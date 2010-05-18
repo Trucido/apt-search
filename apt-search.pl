@@ -9,9 +9,9 @@ use Pod::Usage;
 use Glib qw(TRUE FALSE);
 use vars qw($VERSION $NAME $ID);
 
-# $Format:Git ID: (%h) %ci$
 $NAME    = "apt-search.pl";
 $VERSION = "Beta 0815";
+$ID = q(Id: $Format:%t %ai %an$);
 
 my (
     $help,    $man, $show,      $remove,  $install,
@@ -75,7 +75,7 @@ sub print ()
         }
         else
         {
-            $flag_color = BOLD GREEN ' * ', RESET;
+            $flag_color = BOLD GREEN '  *  ', RESET;
         }
 
         if ($a[3] eq "installed")
@@ -100,7 +100,7 @@ sub print ()
         }
         else
         {
-            print BOLD " $a[2]: ", RESET "$a[7]";
+            print RESET, '(',BOLD GREEN, $a[2], RESET, '): ', $a[7];
 
         }
         $count++;
@@ -123,6 +123,7 @@ sub show ()
     foreach my $line (@result)
     {
         chomp($line);
+        next if &check_error($line);
         if ($line =~ /(.*?): (.*)/mg)
         {
 
@@ -150,6 +151,7 @@ sub update ()
         chomp;
         $line = $_;
 
+        next if &check_error($line);
         if ($line =~ /(Hit )(http.*)/mg)
         {
             $col   = GREEN;
@@ -165,12 +167,16 @@ sub update ()
             $match = TRUE;
             $col   = BLUE;
         }
-        elsif ($line =~ /(W: )(.*)/mg)
-        {
-            $match = TRUE;
-            $col   = BOLD YELLOW;
-        }
 
+            if ($line =~ /(.*\.\.\.)$/)
+            {
+                #$match = TRUE;
+                $col = BOLD BLUE, '[ ', BOLD GREEN, 'Done', BOLD BLUE ' ]',
+                  RESET;
+            print BOLD GREEN ' * ', RESET, "$1",
+              " " x ($size[1] - 11 - length($1)), $col, "\n", RESET;
+          next;  
+          }
         print $col, "$1\r", RESET, "\t$2\n", RESET if $match;
 
         # else
@@ -189,7 +195,7 @@ sub install ($)
     my ($cmd) = @_;
     my ($line, $i);
     my $col = RESET;
-    my $pid = open(KID_TO_READ, "aptitude $cmd @ARGV |");
+    my $pid = open(KID_TO_READ, "-|"  );
     my (@tmp, @args);
     my @url;
     if ($install)
@@ -229,13 +235,13 @@ sub install ($)
             chomp;
             $line = $_;
 
+            next if &check_error($line);
             if ($line =~ /(.*\.\.\.)$/)
             {
                 $match = TRUE;
                 $col = BOLD BLUE, '[ ', BOLD GREEN, 'Done', BOLD BLUE ' ]',
                   RESET;
             }
-
             print BOLD GREEN ' * ', RESET, "$1",
               " " x ($size[1] - 11 - length($1)), $col, "\n", RESET
               if $match;
@@ -246,8 +252,8 @@ sub install ($)
 else
 {    # child
         #  ($EUID, $EGID) = ($UID, $GID); # suid only
-    exec("aptitude  $cmd @ARGV")
-      || die "can't exec program: $!";
+         exec("aptitude  $cmd @ARGV 2>&1")
+         || die "can't exec program: $!";
 
     exit;
 
@@ -261,6 +267,29 @@ sub process_one_line
     print "$line\n";
 }
 
+sub check_error ()
+{
+    my ($line) = @_;
+    my $col;
+    my $match = FALSE;
+        if ($line =~ /(^W:)(.*)/mg)
+        {
+            $match = TRUE;
+            $col   = BOLD YELLOW;
+        }
+        elsif ($line =~ /(^E:)(.*)/mg)
+        {
+            $match = TRUE;
+            $col   = BOLD RED, ' * ';
+        }
+    if ($match) 
+    {
+    print STDERR $col, RESET, $2, "\n", RESET;
+    return TRUE;
+    }
+}
+
+
 __END__
 
 =head1 NAME
@@ -269,7 +298,7 @@ apt-serch.pl colors your aptitude search request.
 
 =head1 VERSION
 
-Beta 0815
+$Format:%t %ai %an$
 
 =head1 AUTHOR
 
@@ -290,7 +319,23 @@ B<apt-search.pl>
 [B<-help>] 
 [B<-man>] 
 [B<-version>] 
+[B<-compact>]
+[B<-installed>]
+[B<-compact>]
 [B<package(s)>]
+
+B<apt-search.pl> 
+[B<-help>] 
+[B<-man>] 
+[B<-version>] 
+[B<-remove|install|show>] 
+[B<package(s)>]
+
+B<apt-search.pl> 
+[B<-help>] 
+[B<-man>] 
+[B<-version>] 
+[B<-update>] 
 
 =head2 EXAMPLES
 
@@ -300,6 +345,10 @@ B<apt-search.pl>
 
 apt-search.pl <package>
 
+=item B<List all installed packages>
+
+apt-search.pl -I -c
+
 =back
 
 =cut
@@ -307,6 +356,24 @@ apt-search.pl <package>
 =head1 ARGUMENTS
 
 =over 4
+
+=item B<-c, -compact>
+
+Shows package information in one line.
+
+=item B<-remove>
+
+Removes a package.
+
+Installs a package.
+
+=item B<-install>
+
+Installs a package.
+
+=item B<-N, -new>
+
+Prints all new packages in the packages list.
 
 =item B<-u, -update>
 
@@ -354,7 +421,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 18, 2010 09:44:05
+Mai 18, 2010 12:14:10
 
 =cut
 
