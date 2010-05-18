@@ -308,6 +308,18 @@ apt-search.pl <package>
 
 =over 4
 
+=item B<-u, -update>
+
+Updates the list of available packages from the apt sources.
+
+=item B<-I, -installed>
+
+Shows installed packages.
+
+=item B<-s, -show>
+
+Shows detailed package informations.
+
 =item B<-h, -help>
 
 Print a brief help message and exits.
@@ -342,7 +354,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 18, 2010 09:30:14
+Mai 18, 2010 09:44:05
 
 =cut
 
