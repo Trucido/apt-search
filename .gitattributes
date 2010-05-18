@@ -1,3 +1,2 @@
-*.pl ident
 *.pl export-subst
 LAST_COMMIT export-subst

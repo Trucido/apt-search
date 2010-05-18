@@ -2,15 +2,16 @@
 
 use strict;
 use warnings;
+
 use IO::Handle;
 use Getopt::Long;
 use Term::ANSIColor qw(:constants);
 use Pod::Usage;
 use Glib qw(TRUE FALSE);
+
 use vars qw($VERSION $NAME $ID);
 
 $NAME    = "apt-search.pl";
-$VERSION = "Beta 0815";
 $ID = q(Id: $Format:%t %ai %an$);
 
 my (
@@ -24,9 +25,9 @@ my @size = split(/ /, qx(stty size));
 sub version ()
 {
 
-    #$VERSION = join(' ', (split(' ', $ID))[1 .. 3]);
-    #$VERSION =~ s/,v\b//;
-    #$VERSION =~ s/(\S+)$/($1)/;
+    $VERSION = join(' ', (split(' ', $ID))[1 .. 3]);
+    $VERSION =~ s/,v\b//;
+    $VERSION =~ s/(\S+)$/($1)/;
     die ' ', $VERSION, "\n\n";
 }
 
@@ -49,7 +50,8 @@ pod2usage(-verbose => 1) if $help;
 pod2usage(-verbose => 2) if $man;
 &show($ARGV[0]) if $show;
 
-#pod2usage("$0: No packages given.") if ((@ARGV == 0) and not ($new == TRUE));
+pod2usage("$0: No packages given.") if ((@ARGV == 0) 
+        and not $show and not $update);
 &update()           if $update;
 &install('install') if $install;
 &install('remove')  if $remove;
@@ -421,7 +423,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 18, 2010 12:14:10
+Mai 18, 2010 13:57:45
 
 =cut
 
