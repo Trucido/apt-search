@@ -121,7 +121,7 @@ sub print ()
 sub show ()
 {
     my ($pack) = @_;
-    @result = qx(aptitude -q show $pack );
+    @result = qx(aptitude -q show $pack 2>&1);
 
     foreach my $line (@result)
     {
@@ -145,6 +145,10 @@ sub update ()
 
     # system (@args);
     #  (@args) = qx(aptitude -q update );# or die "bla";
+    
+    
+    &root();
+    
     $col = RESET;
     open(FOO, "aptitude -q update 2>&1 | ");
 
@@ -197,6 +201,8 @@ my $spin = TRUE;
 
 sub install ($)
 {
+    
+    &root();
     my ($cmd) = @_;
     my ($size, $i, $x) = 0;
     my $col = RESET;
@@ -205,6 +211,8 @@ sub install ($)
     my (@list, @wget, @pkg);
     my $s_pid = fork();
     my $aptstring;
+    
+    
     if ($install || $remove)
     {
         $aptstring = 'autoremove' if $remove;
@@ -293,11 +301,11 @@ sub install ($)
                     print STDERR "Nothing to $aptstring\n";
                     exit(1);
                 }
-            open FILE, ">/tmp/$0_db.txt" or die $!;
+            open FILE, ">/tmp/$0_db.txt"; #or die $!;
             print FILE @wget;
             close FILE;
             print "\bDone\n";
-            print $line;
+            print $line if $line;
             printf(
                 "\nTotal: %s Packages, Downloads: %s, Size of Downloads: %.3f kB\n",
                 ($i),
@@ -318,7 +326,7 @@ sub install ($)
             close FILE;
 
             open FILE, "</tmp/$0_db.txt" or die $!;
-            $i = 0;
+            $i = 1;
             foreach (<FILE>)
             {
                 chomp;
@@ -343,12 +351,11 @@ sub install ($)
     }
     my $pid = open(KID_TO_READ, "-|");
     $| = 1;
-    my $buffer;
+    my ($buffer,$s);
     if ($pid)
     {
         while (sysread(KID_TO_READ, $line, 64_000) > 0)
         {
-            $col = RESET;
 
             chomp($line);
 
@@ -356,27 +363,43 @@ sub install ($)
             $match = FALSE;
             chomp(my $buffer = $line);
             next if &check_error($buffer);
-            if ($buffer =~ /(.*\.\.\.)$/)
+            my $cols = ' ';
+            
+            if ($buffer =~ /(Selecting)(.*)/)
+            {
+                $col = BOLD CYAN, ">>> $1", RESET ;
+                $buffer = $2;
+            }
+            elsif ($buffer =~ /(Unpacking)(.*)/)
+            {
+                $col = BOLD GREEN, ">>> $1", RESET ;
+                $buffer = $2;
+            }
+            elsif ($buffer =~ /(Removing|Purging)(.*)/)
+            {
+                $col = BOLD RED ">>> $1", RESET;
+                $buffer = "\t$2";
+            }
+            elsif ($buffer =~ /(.*)(\.\.\.|\.\.)$/mg)
             {
                 $match = TRUE;
-
+                $s = $1;    
                 #print "TREU\n";
-                $col = BOLD BLUE, '[ ', BOLD GREEN, 'Done', BOLD BLUE ' ]',
-                  RESET;
+                $cols = BOLD BLUE, '[ ', BOLD GREEN, 'OK', BOLD BLUE ' ]', RESET;
             }
-            if ($buffer =~ /.* \.\.\./)
+            else 
             {
-                $col = ">>> ";
+                $col = RESET ">>>";
             }
-
-            if ($buffer =~ /.*Reading database.*/)
+            
+            if ($buffer =~ /.*Reading database|Extracting.*/)
             {
                 print "\t$buffer\r", RESET;
                 next;
             }
 
-            print "\n", BOLD GREEN ' * ', RESET, "$1",
-              " " x ($size[1] - 11 - length($1)), "$col"
+            print "\n", BOLD GREEN ' * ', RESET, $s,
+              " " x ($size[1] - 9 - length($s)), $cols
               if $match;
 
             if (length($buffer) > 1)
@@ -391,7 +414,7 @@ sub install ($)
     else
     {    # child
             #  ($EUID, $EGID) = ($UID, $GID); # suid only
-        exec("aptitude  -q $cmd @ARGV 2>&1") || die "can't exec program: $!";
+        exec("aptitude -y   $cmd @ARGV 2>&1") || die "can't exec program: $!";
         exit;
 
     }
@@ -403,7 +426,10 @@ sub check_error ()
     my ($line) = @_;
     my $colo   = '';
     my $match  = FALSE;
-
+    my $end_str = BOLD BLUE '[ ', BOLD RED '!!', BOLD BLUE ' ]', RESET;
+    my $bg_str = BOLD RED " * ", RESET;
+    
+    chomp($line);
     if ($line =~ /(W:\s)(.*)/mg)
     {
         $match = TRUE;
@@ -412,7 +438,7 @@ sub check_error ()
     elsif ($line =~ /(E:\s)(.*)/mg)
     {
         $match = TRUE;
-        $colo = BOLD RED, " * ", RESET, "$2\n";
+        $colo = $bg_str. $2. ' ' x ($size[1] - 9 - length($2) ). $end_str;
     }
     if ($match)
     {
@@ -420,21 +446,26 @@ sub check_error ()
         my $es = $2;
 
         #$es =~ s/[\n|\s]+//g;
-        print "$colo\n";
+        print STDERR "\n$colo\n";
         return TRUE;
     }
 }
 
 sub root ()
 {
-    my $col = BOLD RED, ' * ';
-    print STDERR $col, RESET,
-      "Nothing was executed, because a heuristic shows that root permissions \n",
-      RESET;
-    print STDERR $col, RESET,
-      "are required to execute everything successfully.\n", RESET;
+    if ($< != 0)
+    {
+        my $col = BOLD RED, ' * ';
+        print "\n";
+        print STDERR $col, RESET,
+            "Nothing was executed, because a heuristic shows that root permissions \n",
+            RESET;
+        print STDERR $col, RESET,
+            "are required to execute everything successfully.\n\n", RESET;
 
     exit;
+    }
+
 }
 {
     my $i;
@@ -587,7 +618,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 20, 2010 16:58:00
+Mai 20, 2010 23:42:54
 
 =cut
 
