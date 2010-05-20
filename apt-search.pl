@@ -3,16 +3,19 @@
 use strict;
 use warnings;
 
-use IO::Handle;
-use Getopt::Long;
+#use IO::Handle;
+use IO::Pipe;
+use IO::Prompt;
+use Getopt::Long qw(:config no_ignore_case bundling);
 use Term::ANSIColor qw(:constants);
 use Pod::Usage;
 use Glib qw(TRUE FALSE);
+use POSIX ":sys_wait_h";
 
 use vars qw($VERSION $NAME $ID);
 
-$NAME    = "apt-search.pl";
-$ID = q(Id: $Format:%t %ai %an$);
+$NAME = "apt-search.pl";
+$ID   = q(Id: $Format:%t %ai %an$);
 
 my (
     $help,    $man, $show,      $remove,  $install,
@@ -40,8 +43,8 @@ GetOptions(
     'compact|c'   => \$compact,
     'show|s'      => \$show,
     'update|u'    => \$update,
-    'install'     => \$install,
-    'remove'      => \$remove,
+    'install|i'   => \$install,
+    'remove|r'    => \$remove,
 
           ) or pod2usage(-verbose => 0);
 
@@ -50,8 +53,12 @@ pod2usage(-verbose => 1) if $help;
 pod2usage(-verbose => 2) if $man;
 &show($ARGV[0]) if $show;
 
-pod2usage("$0: No packages given.") if ((@ARGV == 0) 
-        and not $show and not $update);
+pod2usage("$0: No packages given.")
+  if (    (@ARGV == 0)
+      and not $show
+      and not $update
+      and not $installed
+      and not $new);
 &update()           if $update;
 &install('install') if $install;
 &install('remove')  if $remove;
@@ -64,6 +71,7 @@ $flag = "~n *" if (@ARGV == 0) and not $new;
 
 sub print ()
 {
+    my $count = 0;
     my $flag_color;
     @result =
       qx(aptitude -F "%s§%p§%V§%C§%A§%v§%a§%d" --disable-columns search $flag);
@@ -102,19 +110,12 @@ sub print ()
         }
         else
         {
-            print RESET, '(',BOLD GREEN, $a[2], RESET, '): ', $a[7];
+            print RESET, '(', BOLD GREEN, $a[2], RESET, '): ', $a[7];
 
         }
         $count++;
     }
-    if (@result)
-    {
-        print "Found " . $count . " matches.\n" if $count > 1;
-    }
-    else
-    {
-        print "No matches found.\n";
-    }
+    print "Found " . $count . " matches.\n";    #if $count > 1;
 }
 
 sub show ()
@@ -170,15 +171,15 @@ sub update ()
             $col   = BLUE;
         }
 
-            if ($line =~ /(.*\.\.\.)$/)
-            {
-                #$match = TRUE;
-                $col = BOLD BLUE, '[ ', BOLD GREEN, 'Done', BOLD BLUE ' ]',
-                  RESET;
+        if ($line =~ /(.*\.\.\.)$/)
+        {
+
+            #$match = TRUE;
+            $col = BOLD BLUE, '[ ', BOLD GREEN, 'Done', BOLD BLUE ' ]', RESET;
             print BOLD GREEN ' * ', RESET, "$1",
               " " x ($size[1] - 11 - length($1)), $col, "\n", RESET;
-          next;  
-          }
+            next;
+        }
         print $col, "$1\r", RESET, "\t$2\n", RESET if $match;
 
         # else
@@ -192,105 +193,268 @@ sub update ()
 
 #print " " x ($size[1] - 5) , "Done\n";
 
+my $spin = TRUE;
+
 sub install ($)
 {
     my ($cmd) = @_;
-    my ($line, $i);
+    my ($size, $i, $x) = 0;
     my $col = RESET;
-    my $pid = open(KID_TO_READ, "-|"  );
-    my (@tmp, @args);
-    my @url;
-    if ($install)
+    my (@tmp,  @args, $match);
+    my (@url,  $line, $yes, @flags);
+    my (@list, @wget, @pkg);
+    my $s_pid = fork();
+    my $aptstring;
+    if ($install || $remove)
     {
-     @tmp =  qx(apt-get -qq --print-uris install @ARGV);
-     $i=0;
-     foreach (@tmp)
+        $aptstring = 'autoremove' if $remove;
+        $aptstring = 'install' if $install;
+
+        if ($s_pid)
         {
-          chomp;
-        @url = split(/ /,$_);
-        next if not $url[0];
-       print "$url[0] $url[1]\n";
+            print GREEN,
+              "\nThese are the packages that would be ". $aptstring."d, in order:",
+              RESET, "\n\n";
+            print "Calculating dependencies  ";
+            my $check;
+            do
+            {
+                $check = waitpid($s_pid, WNOHANG);
+                &spinner();
 
-       print "\n>>> Downloading (", BOLD YELLOW, $i, RESET,' of ', BOLD YELLOW,
-       ( $#tmp + 1 ), RESET,  ")", BOLD GREEN,
-       $ARGV[$i],RESET,"\n\n";
-        @args = (
-       "wget", $url[0],  
-       "-c -t 5 -T 60 --passive-ftp",  
-       "-O /var/cache/apt/archives/$url[1]");
+            } until (($check));    # or ($count > 25));
+        exit if $?;
+            my $string = BOLD WHITE,
+          "\n\nWould you like to $aptstring these packages?",
+          RESET, " [", BOLD GREEN, "Yes", RESET, "/", BOLD RED, "No", RESET,
+          "] ";
+        if (!prompt($string, -tyn1s => 0.8))
+        {
+            print "\nQuitting.\n";
+            exit;
+        }
+        }
+        elsif (defined $s_pid)
+        {
+            @list = qx(apt-get -qq --print-uris install @ARGV 2>&1) if $install;
+            @tmp  = qx(apt-get -qq --dry-run $aptstring  @ARGV 2>&1);
+            my ($l, @p);
+            if (@tmp)
+            {
 
-        qx(@args);
-        $i++;
-   }
-   # exit;    
+                ($i, $x) = 0;
+                foreach (@tmp)
+                {
+                    chomp;
 
+                    #$flags = undef;
+                    next if &check_error($_);
+                    chomp(@url = split(/ /, $_));
+                    next if ($url[0] =~ /Conf.*/);
+                    next if not $url[0];
+                    $p[$i] = '^' . $url[1] . '$';
+                    $url[2] =~ s/[\(\)]//;
+
+                    $flags[$i] .= BOLD GREEN "I";
+                    $pkg[$i] = BOLD GREEN, $url[1], RESET, "-$url[2]";
+                    foreach (@list)
+                    {
+                        chomp;
+                        my @l   = split(/ /, $_);
+                        my @pck = split(/_/, $l[1]);
+                        if ($url[1] eq $pck[0])
+                        {
+                            $flags[$i] .= BOLD YELLOW "D";
+                            $size += $l[2];
+                            $wget[$x++] = "$l[0]§$l[1]§$url[1]\n";
+                        }
+
+                    }
+
+                    $i++;
+                }
+
+                $i = 0;
+
+                my @size = qx(aptitude -F "%D" search @p);
+
+                foreach (@pkg)
+                {
+                    chomp($size[$i]);
+                    $line .= RESET "[  ", $flags[$i], RESET,
+                      "  ] $pkg[$i] $size[$i] \n";
+                    $i++;
+                }
+
+            }
+                else 
+                {
+                    print "\bDone\n";
+                    print STDERR "Nothing to $aptstring\n";
+                    exit(1);
+                }
+            open FILE, ">/tmp/$0_db.txt" or die $!;
+            print FILE @wget;
+            close FILE;
+            print "\bDone\n";
+            print $line;
+            printf(
+                "\nTotal: %s Packages, Downloads: %s, Size of Downloads: %.3f kB\n",
+                ($i),
+                ($#wget + 1),
+                ($size / 1024)
+            );
+            exit();
+        }
+
+
+        if (-e '/tmp/' . $0 . '_db.txt')
+        {
+            print "yes\n";
+            my $dl;
+            open FILE, "</tmp/$0_db.txt" or die $!;
+
+            $dl++ while <FILE>;
+            close FILE;
+
+            open FILE, "</tmp/$0_db.txt" or die $!;
+            $i = 0;
+            foreach (<FILE>)
+            {
+                chomp;
+                my @url = split(/§/, $_);
+                print "\n>>> Downloading (", BOLD YELLOW, $i++, RESET, ' of ',
+                  BOLD YELLOW,
+                  $dl, RESET, ") ", BOLD GREEN,
+                  $url[2], RESET, "\n\n";
+                @args = (
+                         "wget", $url[0],
+                         "-c -t 5 -T 60 --passive-ftp",
+                         "-O /var/cache/apt/archives/$url[1]"
+                        );
+
+                qx(@args);    # or die $!;
+
+            }
+            close FILE;
+
+            #unlink ("/tmp/$0_db.txt");
+        }
     }
-    
+    my $pid = open(KID_TO_READ, "-|");
+    $| = 1;
+    my $buffer;
     if ($pid)
     {
-      #gg KID_TO_READ->autoflush(1);
-      # select KID_TO_READ; | = 1;
-
-        while (<KID_TO_READ>)
+        while (sysread(KID_TO_READ, $line, 64_000) > 0)
         {
-            my $match = FALSE;
-            chomp;
-            $line = $_;
+            $col = RESET;
 
-            next if &check_error($line);
-            if ($line =~ /(.*\.\.\.)$/)
+            chomp($line);
+
+            #$line = $_;
+            $match = FALSE;
+            chomp(my $buffer = $line);
+            next if &check_error($buffer);
+            if ($buffer =~ /(.*\.\.\.)$/)
             {
                 $match = TRUE;
+
+                #print "TREU\n";
                 $col = BOLD BLUE, '[ ', BOLD GREEN, 'Done', BOLD BLUE ' ]',
                   RESET;
             }
-            print BOLD GREEN ' * ', RESET, "$1",
-              " " x ($size[1] - 11 - length($1)), $col, "\n", RESET
+            if ($buffer =~ /.* \.\.\./)
+            {
+                $col = ">>> ";
+            }
+
+            if ($buffer =~ /.*Reading database.*/)
+            {
+                print "\t$buffer\r", RESET;
+                next;
+            }
+
+            print "\n", BOLD GREEN ' * ', RESET, "$1",
+              " " x ($size[1] - 11 - length($1)), "$col"
               if $match;
-            print ">>> $line\r\n" if not $match;
+
+            if (length($buffer) > 1)
+            {
+                print "\n", $col, " ", $buffer if not $match;
+            }
+            $| = 1;
         }
-    close KID_TO_READ;
-}
-else
-{    # child
-        #  ($EUID, $EGID) = ($UID, $GID); # suid only
-         exec("aptitude  $cmd @ARGV 2>&1")
-         || die "can't exec program: $!";
+        print "\n";
+        close KID_TO_READ;
+    }
+    else
+    {    # child
+            #  ($EUID, $EGID) = ($UID, $GID); # suid only
+        exec("aptitude  -q $cmd @ARGV 2>&1") || die "can't exec program: $!";
+        exit;
 
+    }
     exit;
-
-     }
-exit;
- }
-
-sub process_one_line
-{
-    my $line = shift @_;
-    print "$line\n";
 }
 
 sub check_error ()
 {
     my ($line) = @_;
-    my $col;
-    my $match = FALSE;
-        if ($line =~ /(^W:)(.*)/mg)
-        {
-            $match = TRUE;
-            $col   = BOLD YELLOW;
-        }
-        elsif ($line =~ /(^E:)(.*)/mg)
-        {
-            $match = TRUE;
-            $col   = BOLD RED, ' * ';
-        }
-    if ($match) 
+    my $colo   = '';
+    my $match  = FALSE;
+
+    if ($line =~ /(W:\s)(.*)/mg)
     {
-    print STDERR $col, RESET, $2, "\n", RESET;
-    return TRUE;
+        $match = TRUE;
+        $colo = BOLD YELLOW " * ", RESET "$2\n";
+    }
+    elsif ($line =~ /(E:\s)(.*)/mg)
+    {
+        $match = TRUE;
+        $colo = BOLD RED, " * ", RESET, "$2\n";
+    }
+    if ($match)
+    {
+        $| = 1;
+        my $es = $2;
+
+        #$es =~ s/[\n|\s]+//g;
+        print "$colo\n";
+        return TRUE;
     }
 }
 
+sub root ()
+{
+    my $col = BOLD RED, ' * ';
+    print STDERR $col, RESET,
+      "Nothing was executed, because a heuristic shows that root permissions \n",
+      RESET;
+    print STDERR $col, RESET,
+      "are required to execute everything successfully.\n", RESET;
+
+    exit;
+}
+{
+    my $i;
+
+    sub spinner ()
+    {
+        $| = 1;
+        my %spinner = (
+                       '|'  => '/',
+                       '/'  => '-',
+                       '-'  => "\\",
+                       "\\" => '|'
+                      );
+
+        $i = (!defined $i) ? '|' : $spinner{$i};
+
+        #print $string;
+        print "\b$i";
+    }
+}
 
 __END__
 
@@ -423,7 +587,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 18, 2010 13:57:45
+Mai 20, 2010 16:58:00
 
 =cut
 
