@@ -1,16 +1,19 @@
 #!/usr/bin/perl
 
-use strict;
-use warnings;
 
-#use IO::Handle;
-use IO::Pipe;
-use IO::Prompt;
 use Getopt::Long qw(:config no_ignore_case bundling);
 use Term::ANSIColor qw(:constants);
 use Pod::Usage;
 use Glib qw(TRUE FALSE);
 use POSIX ":sys_wait_h";
+
+use FindBin qw($RealBin);                                                                        
+use lib $RealBin;   
+
+use Functions;
+
+use strict;
+use warnings;
 
 use vars qw($VERSION $NAME $ID);
 
@@ -23,7 +26,6 @@ my (
    ) = FALSE;
 my @result;
 my ($count, $flag) = undef;
-my @size = split(/ /, qx(stty size));
 
 sub version ()
 {
@@ -126,11 +128,14 @@ sub show ()
     foreach my $line (@result)
     {
         chomp($line);
-        next if &check_error($line);
+        next if check_error($line);
+        $line =~ s/^\s//g;
         if ($line =~ /(.*?): (.*)/mg)
         {
-
-            print GREEN "$1", RESET ":\r", RESET "\t\t\t$2\n";
+            my $inf = $2;
+            $inf =~ s/^\s//g;
+            
+            print GREEN "$1", RESET ":\r", RESET "\n\t\t\t$inf\n";
         }
         else
         {
@@ -143,11 +148,7 @@ sub update ()
 {
     my ($line, $col);
 
-    # system (@args);
-    #  (@args) = qx(aptitude -q update );# or die "bla";
-    
-    
-    &root();
+    check_root();
     
     $col = RESET;
     open(FOO, "aptitude -q update 2>&1 | ");
@@ -158,7 +159,7 @@ sub update ()
         chomp;
         $line = $_;
 
-        next if &check_error($line);
+        next if check_error($line);
         if ($line =~ /(Hit )(http.*)/mg)
         {
             $col   = GREEN;
@@ -178,10 +179,7 @@ sub update ()
         if ($line =~ /(.*\.\.\.)$/)
         {
 
-            #$match = TRUE;
-            $col = BOLD BLUE, '[ ', BOLD GREEN, 'Done', BOLD BLUE ' ]', RESET;
-            print BOLD GREEN ' * ', RESET, "$1",
-              " " x ($size[1] - 11 - length($1)), $col, "\n", RESET;
+            print_ok($1);
             next;
         }
         print $col, "$1\r", RESET, "\t$2\n", RESET if $match;
@@ -197,12 +195,11 @@ sub update ()
 
 #print " " x ($size[1] - 5) , "Done\n";
 
-my $spin = TRUE;
 
 sub install ($)
 {
     
-    &root();
+    check_root();
     my ($cmd) = @_;
     my ($size, $i, $x) = 0;
     my $col = RESET;
@@ -229,18 +226,12 @@ sub install ($)
             {
                 $check = waitpid($s_pid, WNOHANG);
                 &spinner();
-
+                sleep 1;
             } until (($check));    # or ($count > 25));
         exit if $?;
-            my $string = BOLD WHITE,
-          "\n\nWould you like to $aptstring these packages?",
-          RESET, " [", BOLD GREEN, "Yes", RESET, "/", BOLD RED, "No", RESET,
-          "] ";
-        if (!prompt($string, -tyn1s => 0.8))
-        {
-            print "\nQuitting.\n";
-            exit;
-        }
+        
+        ask_user("Would you like to $aptstring these packages?");
+        
         }
         elsif (defined $s_pid)
         {
@@ -256,7 +247,7 @@ sub install ($)
                     chomp;
 
                     #$flags = undef;
-                    next if &check_error($_);
+                    next if check_error($_);
                     chomp(@url = split(/ /, $_));
                     next if ($url[0] =~ /Conf.*/);
                     next if not $url[0];
@@ -304,10 +295,11 @@ sub install ($)
             open FILE, ">/tmp/$0_db.txt"; #or die $!;
             print FILE @wget;
             close FILE;
-            print "\bDone\n";
-            print $line if $line;
+            $|=0;
+            print "";
+            print "\bDone\n$line" if $line;
             printf(
-                "\nTotal: %s Packages, Downloads: %s, Size of Downloads: %.3f kB\n",
+                "\n\nTotal: %s Packages, Downloads: %s, Size of Downloads: %.3f kB\n",
                 ($i),
                 ($#wget + 1),
                 ($size / 1024)
@@ -362,7 +354,7 @@ sub install ($)
             #$line = $_;
             $match = FALSE;
             chomp(my $buffer = $line);
-            next if &check_error($buffer);
+            next if check_error($buffer);
             my $cols = ' ';
             
             if ($buffer =~ /(Selecting)(.*)/)
@@ -398,9 +390,7 @@ sub install ($)
                 next;
             }
 
-            print "\n", BOLD GREEN ' * ', RESET, $s,
-              " " x ($size[1] - 9 - length($s)), $cols
-              if $match;
+            print_ok($s) if $match;
 
             if (length($buffer) > 1)
             {
@@ -421,52 +411,9 @@ sub install ($)
     exit;
 }
 
-sub check_error ()
-{
-    my ($line) = @_;
-    my $colo   = '';
-    my $match  = FALSE;
-    my $end_str = BOLD BLUE '[ ', BOLD RED '!!', BOLD BLUE ' ]', RESET;
-    my $bg_str = BOLD RED " * ", RESET;
-    
-    chomp($line);
-    if ($line =~ /(W:\s)(.*)/mg)
-    {
-        $match = TRUE;
-        $colo = BOLD YELLOW " * ", RESET "$2\n";
-    }
-    elsif ($line =~ /(E:\s)(.*)/mg)
-    {
-        $match = TRUE;
-        $colo = $bg_str. $2. ' ' x ($size[1] - 9 - length($2) ). $end_str;
-    }
-    if ($match)
-    {
-        $| = 1;
-        my $es = $2;
 
-        #$es =~ s/[\n|\s]+//g;
-        print STDERR "\n$colo\n";
-        return TRUE;
-    }
-}
 
-sub root ()
-{
-    if ($< != 0)
-    {
-        my $col = BOLD RED, ' * ';
-        print "\n";
-        print STDERR $col, RESET,
-            "Nothing was executed, because a heuristic shows that root permissions \n",
-            RESET;
-        print STDERR $col, RESET,
-            "are required to execute everything successfully.\n\n", RESET;
 
-    exit;
-    }
-
-}
 {
     my $i;
 
@@ -483,7 +430,7 @@ sub root ()
         $i = (!defined $i) ? '|' : $spinner{$i};
 
         #print $string;
-        print "\b$i";
+        print "\b$i \b";
     }
 }
 
@@ -618,7 +565,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 20, 2010 23:42:54
+Mai 21, 2010 08:20:40
 
 =cut
 
