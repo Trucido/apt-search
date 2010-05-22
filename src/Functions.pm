@@ -11,7 +11,7 @@ use IO::Prompt;
 
 use Exporter;
 our @ISA = qw(Exporter);
-our @EXPORT = qw(spinner ask_user check_root check_error print_info print_err print_warn print_ok);
+our @EXPORT = qw(color_apt spinner ask_user check_root check_error print_info print_err print_warn print_ok);
 
 ##Variables
 #Size of TTY
@@ -51,6 +51,11 @@ sub check_error ($)
         &print_err($2);
         return TRUE;
     }
+    elsif ($line =~ /(search:\s)(.*)/mg)
+    {
+        &print_warn($2);
+        return TRUE;
+    }
     return FALSE;
 }
 
@@ -62,7 +67,7 @@ sub print_err ($)
     my $e_prefix = BOLD RED ' * ', RESET;
     my $count_w = ($columns - length($string) - 9);   
 
-    print STDERR  $e_prefix.$string. ' ' x $count_w.$e_suffix."\n";
+    print STDERR  "\n".$e_prefix.$string. ' ' x $count_w.$e_suffix."\n";
 }
 
 #Warning massage
@@ -71,7 +76,7 @@ sub print_warn ($)
     my ($string) = @_;
     my $w_prefix = BOLD YELLOW ' * ', RESET; 
 
-    print STDERR  $w_prefix.$string."\n";
+    print STDERR  "\n".$w_prefix.$string."\n";
 
 }
 
@@ -114,7 +119,7 @@ sub ask_user ($)
     sub spinner ()
     {
         my $i;
- local              $| = 1;
+# local              $| = 1;
         my %spinner = (
                        '|'  => '/',
                        '/'  => '-',
@@ -123,12 +128,82 @@ sub ask_user ($)
                       );
                        while(TRUE)
                       {
+
             $i = (!defined $i) ? '|' : $spinner{$i};
             
         print "\b$i";
     }
     }
+sub color_apt ($@)
+{
+    my ($aptstring, $pkg_list) = @_;
+    my ($buffer, $s, $color,$line,$match);
+    print "$aptstring, @$pkg_list\n";
+    #exit;
+    my $pid = open(PIPE, "-|");
 
+    if ($pid)
+    {
+        while (sysread(PIPE, $line, 64_000) > 0)
+        {
+
+            chomp($buffer = $line);
+
+            $match = FALSE;
+            
+            next if check_error($buffer);
+
+            if ($buffer =~ /(Selecting)(.*)/)
+            {
+                $color = BOLD CYAN, ">>> $1", RESET;
+                $buffer = $2;
+            }
+            elsif ($buffer =~ /(Unpacking)(.*)/)
+            {
+                $color = BOLD GREEN, ">>> $1", RESET;
+                $buffer = $2;
+            }
+            elsif ($buffer =~ /(Removing|Purging)(.*)/)
+            {
+                $color = BOLD RED ">>> $1", RESET;
+                $buffer = "\t$2";
+            }
+            elsif ($buffer =~ /(.*)(\.\.\.)$/mg)
+            {
+                $match = TRUE;
+            }
+            else
+            {
+                $color = RESET ">>>";
+            }
+
+        $| = 1;
+            if ($buffer =~ /.*Reading database|Extracting.*/)
+            {
+                print "\t$buffer\r";
+                next;
+            }
+
+            print_ok($1) if $match;
+
+            if (length($buffer) > 1)
+            {
+                print_info($color.' '. $buffer) if not $match;
+            }
+        }
+        print "\n";
+        close PIPE;
+    }
+    else
+    {
+
+        #  ($EUID, $EGID) = ($UID, $GID); # suid only
+        exec($aptstring." @$pkg_list 2>&1")
+          || die "can't exec program: $!";
+        exit;
+
+    }
+}
 return 1;
 
 __END__

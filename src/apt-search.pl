@@ -82,8 +82,6 @@ sub print ()
 
     foreach (@result)
     {
-
-        #chomp;
         my $match = FALSE;
         my ($inst, $nor, $act) = FALSE;
         my $buffer;
@@ -196,32 +194,35 @@ sub show ()
     foreach my $line (@result)
     {
         chomp($line);
+        
         next if check_error($line);
+        
         $line =~ s/^\s//g;
+        
         if ($line =~ /(.*?): (.*)/mg)
         {
             my $inf = $2;
             $inf =~ s/^\s//g;
 
-            print GREEN "$1", RESET ":\r", RESET "\n\t\t\t$inf\n";
+            print_info(GREEN "$1", RESET ":\r"."\n\t\t\t$inf");
         }
         else
         {
-            print "\t\t\t$line\n";
+            print_info("\t\t\t$line");
         }
     }
 }
 
 sub update ()
 {
-    my ($line, $col);
+    my ($line, $color, $inf_line, $string);
 
     check_root();
 
-    $col = RESET;
-    open(FOO, "aptitude -q update 2>&1 | ");
+    $color = RESET;
+    open(UPDATE, "aptitude -q update 2>&1 | ");
 
-    while (<FOO>)
+    while (<UPDATE>)
     {
         my $match = FALSE;
         chomp;
@@ -230,18 +231,18 @@ sub update ()
         next if check_error($line);
         if ($line =~ /(Hit )(http.*)/mg)
         {
-            $col   = GREEN;
+            $color   = GREEN $1, RESET;
             $match = TRUE;
         }
         elsif ($line =~ /(Ign )(http.*)/mg)
         {
             $match = TRUE;
-            $col   = RED;
+            $color   = RED $1, RESET;;
         }
-        elsif ($line =~ /(Get:[0-9]) (http.*)/mg)
+        elsif ($line =~ /(Get:[0-9]\+) (http.*)/mg)
         {
             $match = TRUE;
-            $col   = BLUE;
+            $color   = BLUE $1, RESET;
         }
 
         if ($line =~ /(.*\.\.\.)$/)
@@ -249,14 +250,13 @@ sub update ()
             print_ok($1);
             next;
         }
-        print $col, "$1\r", RESET, "\t$2\n", RESET if $match;
+        $inf_line = $color."\t$2";
+        print_info($inf_line) if $match;
 
-        # else
-        print "$line\n" if not $match;
+        print_info("$line") if not $match;
 
-        #}
     }
-    close FOO;
+    close UPDATE;
     exit;
 }
 
@@ -278,39 +278,48 @@ sub install ($)
 
     my ($l, @p);
     my @pkg_list;
-
-    if ($install || $remove)
-    {
-        $aptstring = 'autoremove' if $remove;
+        $aptstring = 'remove' if $remove;
         $aptstring = 'install'    if $install;
+    @tmp = qx(apt-get -qq --dry-run $aptstring  @ARGV 2>&1);
+    
+    foreach (my @a = qx(apt-get  --dry-run $aptstring  @ARGV 2>&1))
+    {
+        if (check_error($_))
+        {
+            color_apt("apt-get --dry-run $aptstring", \@ARGV);
+            exit;
+        }
+    
+    }
 
         if ($s_pid = fork())
         {
 
-            print GREEN 'These are the packages that would be '
+            print GREEN "\n".'These are the packages that would be '
               . $aptstring
               . "d, in order:\n\n", RESET 'Calculating dependencies  ';
 
-            @url_list = qx(apt-get -qq --print-uris install @ARGV 2>&1)
-              if $install;
+            @url_list = qx(apt-get -qq --print-uris install @ARGV 2>&1) if $install;
             @tmp = qx(apt-get -qq --dry-run $aptstring  @ARGV 2>&1);
+            
             if (@tmp)
             {
-
                 ($i, $x) = 0;
                 foreach (@tmp)
                 {
                     chomp;
 
                     next if check_error($_);
+                    
                     chomp(my @string = split(/ /, $_));
-                    next if not $string[0] or not($string[0] =~ /Conf.*/);
-
+                    
+                    next if not $string[0] or ($string[0] =~ /Conf.*/);
+                    
                     $pkg_list[$i] = $string[1];
                     $p[$i]        = '^' . $string[1] . '$';
                     $string[2] =~ s/[\(\)]//;
 
-                    $flags[$i] .= BOLD GREEN "I";
+                    $flags[$i] .= BOLD GREEN "N";
                     $pkg_version[$i] = BOLD GREEN, $string[1], RESET,
                       "-$string[2]";
 
@@ -330,9 +339,8 @@ sub install ($)
 
                     $i++;
                 }
-
                 $i = 0;
-                my @size = qx(aptitude -F "%D" search @p);
+                my @size = qx(aptitude -F "%D" search @p 2>&1);
 
                 foreach (@pkg_version)
                 {
@@ -352,7 +360,7 @@ sub install ($)
                 exit(1);
             }
             kill('SIGTERM', $s_pid);
-            print "\bDone\n$line" if $line;
+            print_info("\bDone\n\n$line") if $line;
             printf(
                 "\n\nTotal: %s Packages, Downloads: %s, Size of Downloads: %.3f kB\n",
                 ($i),
@@ -388,75 +396,8 @@ sub install ($)
             }
 
         }
-    }
-    my $pid = open(KID_TO_READ, "-|");
-    my ($buffer, $s);
+        color_apt("aptitude -y $aptstring",\@pkg_list);
 
-    if ($pid)
-    {
-        while (sysread(KID_TO_READ, $line, 64_000) > 0)
-        {
-
-            chomp($line);
-
-            $match = FALSE;
-            chomp(my $buffer = $line);
-            next if check_error($buffer);
-            my $cols = ' ';
-
-            if ($buffer =~ /(Selecting)(.*)/)
-            {
-                $col = BOLD CYAN, ">>> $1", RESET;
-                $buffer = $2;
-            }
-            elsif ($buffer =~ /(Unpacking)(.*)/)
-            {
-                $col = BOLD GREEN, ">>> $1", RESET;
-                $buffer = $2;
-            }
-            elsif ($buffer =~ /(Removing|Purging)(.*)/)
-            {
-                $col = BOLD RED ">>> $1", RESET;
-                $buffer = "\t$2";
-            }
-            elsif ($buffer =~ /(.*)(\.\.\.|\.\.)$/mg)
-            {
-                $match = TRUE;
-                $s     = $1;
-                $cols  = BOLD BLUE, '[ ', BOLD GREEN, 'OK', BOLD BLUE ' ]',
-                  RESET;
-            }
-            else
-            {
-                $col = RESET ">>>";
-            }
-
-            if ($buffer =~ /.*Reading database|Extracting.*/)
-            {
-                print "\t$buffer\r", RESET;
-                next;
-            }
-
-            print_ok($s) if $match;
-
-            if (length($buffer) > 1)
-            {
-                print "\n", $col, " ", $buffer if not $match;
-            }
-            $| = 1;
-        }
-        print "\n";
-        close KID_TO_READ;
-    }
-    else
-    {
-
-        #  ($EUID, $EGID) = ($UID, $GID); # suid only
-        exec("aptitude -y   $cmd @pkg_list 2>&1")
-          || die "can't exec program: $!";
-        exit;
-
-    }
     exit;
 }
 
@@ -486,26 +427,26 @@ The output of B<apt-search.pl> is similar to eix.
 =head1 SYNOPSIS
 
 B<apt-search.pl> 
-[B<-help>] 
-[B<-man>] 
-[B<-version>] 
-[B<-compact>]
-[B<-installed>]
-[B<-compact>]
+[B<--help>] 
+[B<--man>] 
+[B<--version>] 
+[B<--compact>]
+[B<--installed>]
+[B<--compact>]
 [B<package(s)>]
 
 B<apt-search.pl> 
-[B<-help>] 
-[B<-man>] 
-[B<-version>] 
-[B<-remove|install|show>] 
+[B<--help>] 
+[B<--man>] 
+[B<--version>] 
+[B<--remove|install|show>] 
 [B<package(s)>]
 
 B<apt-search.pl> 
-[B<-help>] 
-[B<-man>] 
-[B<-version>] 
-[B<-update>] 
+[B<--help>] 
+[B<--man>] 
+[B<--version>] 
+[B<--update>] 
 
 =head2 EXAMPLES
 
@@ -517,7 +458,7 @@ apt-search.pl <package>
 
 =item B<List all installed packages>
 
-apt-search.pl -I -c
+apt-search.pl -Ic
 
 =back
 
@@ -537,35 +478,39 @@ Removes a package.
 
 Installs a package.
 
-=item B<-install>
+=item B<--install>
 
 Installs a package.
 
-=item B<-N, -new>
+=item B<-N, --new>
 
 Prints all new packages in the packages list.
 
-=item B<-u, -update>
+=item B<-u, --update>
 
 Updates the list of available packages from the apt sources.
 
-=item B<-I, -installed>
+=item B<-I, --installed>
 
 Shows installed packages.
 
-=item B<-s, -show>
+=item B<-s, --show>
 
 Shows detailed package informations.
 
-=item B<-h, -help>
+=item B<-u, --update>
+
+Shows all packages with aktive aktion Flag.
+
+=item B<-h, --help>
 
 Print a brief help message and exits.
 
-=item B<-man>
+=item B<--man>
 
 Prints the manual page and exits.
 
-=item B<-version>
+=item B<--version>
 
 Prints version.
 
@@ -591,8 +536,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 22, 2010 15:02:27
+Mai 22, 2010 23:50:48
 
 =cut
-
 # vi:ts=4:sw=4:ai:expandtab 
