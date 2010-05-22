@@ -11,7 +11,7 @@ use IO::Prompt;
 
 use Exporter;
 our @ISA = qw(Exporter);
-our @EXPORT = qw(ask_user check_root check_error print_err print_warn print_ok);
+our @EXPORT = qw(spinner ask_user check_root check_error print_info print_err print_warn print_ok);
 
 ##Variables
 #Size of TTY
@@ -75,6 +75,13 @@ sub print_warn ($)
 
 }
 
+sub print_info ($)
+{
+    my ($string) = @_;
+
+    print $string."\n";
+}
+
 #OK massage
 sub print_ok ($)
 {
@@ -104,6 +111,23 @@ sub ask_user ($)
 
 }
 
+    sub spinner ()
+    {
+        my $i;
+ local              $| = 1;
+        my %spinner = (
+                       '|'  => '/',
+                       '/'  => '-',
+                       '-'  => "\\",
+                       "\\" => '|'
+                      );
+                       while(TRUE)
+                      {
+            $i = (!defined $i) ? '|' : $spinner{$i};
+            
+        print "\b$i";
+    }
+    }
 
 return 1;
 

@@ -1,14 +1,13 @@
 #!/usr/bin/perl
 
-
 use Getopt::Long qw(:config no_ignore_case bundling);
 use Term::ANSIColor qw(:constants);
 use Pod::Usage;
 use Glib qw(TRUE FALSE);
 use POSIX ":sys_wait_h";
 
-use FindBin qw($RealBin);                                                                        
-use lib $RealBin;   
+use FindBin qw($RealBin);
+use lib $RealBin;
 
 use Functions;
 
@@ -21,8 +20,8 @@ $NAME = "apt-search.pl";
 $ID   = q(Id: $Format:%t %ai %an$);
 
 my (
-    $help,    $man, $show,      $remove,  $install,
-    $version, $new, $installed, $compact, $update
+    $help, $man,       $show,    $remove, $install, $version,
+    $new,  $installed, $compact, $update, $upgrade
    ) = FALSE;
 my @result;
 my ($count, $flag) = undef;
@@ -37,14 +36,16 @@ sub version ()
 }
 
 GetOptions(
-    'help|h'      => \$help,
-    'man'         => \$man,
-    'version'     => \$version,
-    'new|N'       => \$new,
+    'help|h'  => \$help,
+    'man'     => \$man,
+    'version' => \$version,
+    'new|N'   => \$new,
+
+    'upgrade|u'   => \$upgrade,
     'installed|I' => \$installed,
     'compact|c'   => \$compact,
     'show|s'      => \$show,
-    'update|u'    => \$update,
+    'sync'        => \$update,
     'install|i'   => \$install,
     'remove|r'    => \$remove,
 
@@ -60,7 +61,8 @@ pod2usage("$0: No packages given.")
       and not $show
       and not $update
       and not $installed
-      and not $new);
+      and not $new
+      and not $upgrade);
 &update()           if $update;
 &install('install') if $install;
 &install('remove')  if $remove;
@@ -73,51 +75,117 @@ $flag = "~n *" if (@ARGV == 0) and not $new;
 
 sub print ()
 {
+    my ($flag_color, $pkg_string);
     my $count = 0;
-    my $flag_color;
     @result =
-      qx(aptitude -F "%s§%p§%V§%C§%A§%v§%a§%d" --disable-columns search $flag);
+      qx(aptitude -F "%s§%p§%V§%C§%A§%v§%a§%d" --disable-columns search $flag 2>&1);
+
     foreach (@result)
     {
+
+        #chomp;
+        my $match = FALSE;
+        my ($inst, $nor, $act) = FALSE;
+        my $buffer;
         my @a = split(/§/, $_);
 
-        if ($a[6] ne " ")
-        {
-            $flag_color = RESET ' [', BOLD RED $a[6], RESET '] ', RESET;
-        }
-        else
-        {
-            $flag_color = BOLD GREEN '  *  ', RESET;
-        }
+        next if check_error(@a);
 
-        if ($a[3] eq "installed")
+        if (@a)
         {
-            print $flag_color, BOLD GREEN "$a[1]", RESET;
-        }
-        else
-        {
-            next if $installed;
-            print $flag_color, BOLD "$a[1]", RESET;
-        }
+            my $version_string = $a[2];
 
-        if (!$compact)
-        {
-            print GREEN "\n\tVersions:", RESET "\t$a[2]\n";
-            print GREEN "\tStatus:",     RESET "\t\t$a[3]";
-            print " version: $a[5]" if $a[5] ne "<none>";
-            print GREEN "\n\tAction:", RESET "\t\t$a[4]\n" if $a[4] ne "none";
+            if (!$compact)
+            {
+                $buffer .= GREEN "\n\tVersions:", RESET "\t$a[2]\n";
+                $buffer .= GREEN "\tStatus:",     RESET "\t\t$a[3]";
+                $buffer .= " version: $a[5]" if $a[5] ne "<none>";
+                $buffer .= GREEN "\n\tAction:", RESET "\t\t$a[4]"
+                  if $a[4] ne "none";
 
-            print GREEN "\n\tSection:",     RESET "\t$a[0]";
-            print GREEN "\n\tDescription:", RESET "\t$a[7]\n";
-        }
-        else
-        {
-            print RESET, '(', BOLD GREEN, $a[2], RESET, '): ', $a[7];
+                $buffer .= GREEN "\n\tSection:",     RESET "\t$a[0]";
+                $buffer .= GREEN "\n\tDescription:", RESET "\t$a[7]\n\n";
+            }
+            else
+            {
+                $buffer = '(' . $version_string . '): ' . $a[7];
+            }
 
+            if ($a[3] eq "installed")
+            {
+                $inst = TRUE;
+                $pkg_string = BOLD GREEN $a[1], RESET;
+
+                if ($a[2] gt $a[5])
+                {
+                    $match = TRUE;
+                    $version_string = RESET $a[5] . ' -> ', CYAN $a[2], RESET;
+                    $flag_color = RESET ' [', BOLD CYAN 'U', RESET '] ', RESET;
+
+                }
+                elsif ($a[2] lt $a[5])
+                {
+                    $match          = TRUE;
+                    $version_string = RESET $a[5] . ' -> ', CYAN $a[2], RESET;
+                    $flag_color     = RESET ' [', BOLD MAGENTA 'D', RESET '] ',
+                      RESET;
+
+                }
+                else
+                {
+                    $flag_color = RESET ' [', BOLD GREEN 'I', RESET '] ', RESET;
+                }
+            }
+            else
+            {
+                $version_string = $a[2];
+                $pkg_string     = BOLD WHITE $a[1], RESET;
+                $flag_color     = BOLD GREEN '  *  ', RESET;
+
+                if ($a[6] ne " ")
+                {
+                    $match = TRUE;
+                    $flag_color = RESET ' [', BOLD RED $a[6], RESET '] ', RESET
+                      if $a[6] ne " ";
+
+                }
+            }
+
+            if ($installed && $upgrade)
+            {
+                if ($inst && $match)
+                {
+                    print_info($flag_color . $pkg_string . $buffer . "\b");
+                    $count++;
+                    next;
+                }
+            }
+            elsif ($installed)
+            {
+                if ($inst)
+                {
+                    print_info($flag_color . $pkg_string . $buffer . "\b");
+                    $count++;
+                    next;
+                }
+            }
+            elsif ($upgrade)
+            {
+                if ($match)
+                {
+                    print_info($flag_color . $pkg_string . $buffer . "\b");
+                    $count++;
+                    next;
+                }
+            }
+            else
+            {
+                print_info($flag_color . $pkg_string . $buffer . "\b");
+                $count++;
+            }
         }
-        $count++;
     }
-    print "Found " . $count . " matches.\n";    #if $count > 1;
+    print_info("Found " . $count . " matches.");    #if $count > 1;
 }
 
 sub show ()
@@ -134,7 +202,7 @@ sub show ()
         {
             my $inf = $2;
             $inf =~ s/^\s//g;
-            
+
             print GREEN "$1", RESET ":\r", RESET "\n\t\t\t$inf\n";
         }
         else
@@ -149,7 +217,7 @@ sub update ()
     my ($line, $col);
 
     check_root();
-    
+
     $col = RESET;
     open(FOO, "aptitude -q update 2>&1 | ");
 
@@ -178,7 +246,6 @@ sub update ()
 
         if ($line =~ /(.*\.\.\.)$/)
         {
-
             print_ok($1);
             next;
         }
@@ -195,49 +262,38 @@ sub update ()
 
 #print " " x ($size[1] - 5) , "Done\n";
 
-
 sub install ($)
 {
-    
+
     check_root();
     my ($cmd) = @_;
+
     my ($size, $i, $x) = 0;
     my $col = RESET;
-    my (@tmp,  @args, $match);
-    my (@url,  $line, $yes, @flags);
-    my (@list, @wget, @pkg);
-    my $s_pid = fork();
+    my (@tmp,      $match);
+    my (@url_list, $line, $yes, @flags);
+    my (@wget,     @pkg_version);
+    my $s_pid;
     my $aptstring;
-    
-    
+
+    my ($l, @p);
+    my @pkg_list;
+
     if ($install || $remove)
     {
         $aptstring = 'autoremove' if $remove;
-        $aptstring = 'install' if $install;
+        $aptstring = 'install'    if $install;
 
-        if ($s_pid)
+        if ($s_pid = fork())
         {
-            print GREEN,
-              "\nThese are the packages that would be ". $aptstring."d, in order:",
-              RESET, "\n\n";
-            print "Calculating dependencies  ";
-            my $check;
-            do
-            {
-                $check = waitpid($s_pid, WNOHANG);
-                &spinner();
-                sleep 1;
-            } until (($check));    # or ($count > 25));
-        exit if $?;
-        
-        ask_user("Would you like to $aptstring these packages?");
-        
-        }
-        elsif (defined $s_pid)
-        {
-            @list = qx(apt-get -qq --print-uris install @ARGV 2>&1) if $install;
-            @tmp  = qx(apt-get -qq --dry-run $aptstring  @ARGV 2>&1);
-            my ($l, @p);
+
+            print GREEN 'These are the packages that would be '
+              . $aptstring
+              . "d, in order:\n\n", RESET 'Calculating dependencies  ';
+
+            @url_list = qx(apt-get -qq --print-uris install @ARGV 2>&1)
+              if $install;
+            @tmp = qx(apt-get -qq --dry-run $aptstring  @ARGV 2>&1);
             if (@tmp)
             {
 
@@ -246,26 +302,28 @@ sub install ($)
                 {
                     chomp;
 
-                    #$flags = undef;
                     next if check_error($_);
-                    chomp(@url = split(/ /, $_));
-                    next if ($url[0] =~ /Conf.*/);
-                    next if not $url[0];
-                    $p[$i] = '^' . $url[1] . '$';
-                    $url[2] =~ s/[\(\)]//;
+                    chomp(my @string = split(/ /, $_));
+                    next if not $string[0] or not($string[0] =~ /Conf.*/);
+
+                    $pkg_list[$i] = $string[1];
+                    $p[$i]        = '^' . $string[1] . '$';
+                    $string[2] =~ s/[\(\)]//;
 
                     $flags[$i] .= BOLD GREEN "I";
-                    $pkg[$i] = BOLD GREEN, $url[1], RESET, "-$url[2]";
-                    foreach (@list)
+                    $pkg_version[$i] = BOLD GREEN, $string[1], RESET,
+                      "-$string[2]";
+
+                    foreach (@url_list)
                     {
                         chomp;
                         my @l   = split(/ /, $_);
-                        my @pck = split(/_/, $l[1]);
-                        if ($url[1] eq $pck[0])
+                        my @pkg = split(/_/, $l[1]);
+                        if ($string[1] eq $pkg[0])
                         {
                             $flags[$i] .= BOLD YELLOW "D";
                             $size += $l[2];
-                            $wget[$x++] = "$l[0]§$l[1]§$url[1]\n";
+                            $wget[$x++] = "$l[0]§$l[1]§$string[1]\n";
                         }
 
                     }
@@ -274,29 +332,26 @@ sub install ($)
                 }
 
                 $i = 0;
-
                 my @size = qx(aptitude -F "%D" search @p);
 
-                foreach (@pkg)
+                foreach (@pkg_version)
                 {
                     chomp($size[$i]);
                     $line .= RESET "[  ", $flags[$i], RESET,
-                      "  ] $pkg[$i] $size[$i] \n";
+                      "  ] $pkg_version[$i] $size[$i] \n";
                     $i++;
                 }
 
             }
-                else 
-                {
-                    print "\bDone\n";
-                    print STDERR "Nothing to $aptstring\n";
-                    exit(1);
-                }
-            open FILE, ">/tmp/$0_db.txt"; #or die $!;
-            print FILE @wget;
-            close FILE;
-            $|=0;
-            print "";
+            else
+            {
+                print "\bDone\n";
+                print_warn("Nothing to $aptstring\n");
+
+                kill('SIGTERM', $s_pid);
+                exit(1);
+            }
+            kill('SIGTERM', $s_pid);
             print "\bDone\n$line" if $line;
             printf(
                 "\n\nTotal: %s Packages, Downloads: %s, Size of Downloads: %.3f kB\n",
@@ -304,46 +359,39 @@ sub install ($)
                 ($#wget + 1),
                 ($size / 1024)
             );
+
+            ask_user("Would you like to $aptstring these packages?");
+        }
+        elsif (defined $s_pid)
+        {
+            spinner();
             exit();
         }
-
-
-        if (-e '/tmp/' . $0 . '_db.txt')
+        if (@wget)
         {
-            print "yes\n";
-            my $dl;
-            open FILE, "</tmp/$0_db.txt" or die $!;
-
-            $dl++ while <FILE>;
-            close FILE;
-
-            open FILE, "</tmp/$0_db.txt" or die $!;
             $i = 1;
-            foreach (<FILE>)
+            foreach (@wget)
             {
                 chomp;
                 my @url = split(/§/, $_);
                 print "\n>>> Downloading (", BOLD YELLOW, $i++, RESET, ' of ',
                   BOLD YELLOW,
-                  $dl, RESET, ") ", BOLD GREEN,
+                  ($#wget + 1), RESET, ") ", BOLD GREEN,
                   $url[2], RESET, "\n\n";
-                @args = (
-                         "wget", $url[0],
-                         "-c -t 5 -T 60 --passive-ftp",
-                         "-O /var/cache/apt/archives/$url[1]"
-                        );
+                my @args = (
+                            "wget", $url[0],
+                            "-c -t 5 -T 60 --passive-ftp",
+                            "-O /var/cache/apt/archives/$url[1]"
+                           );
 
-                qx(@args);    # or die $!;
-
+                qx(@args);
             }
-            close FILE;
 
-            #unlink ("/tmp/$0_db.txt");
         }
     }
     my $pid = open(KID_TO_READ, "-|");
-    $| = 1;
-    my ($buffer,$s);
+    my ($buffer, $s);
+
     if ($pid)
     {
         while (sysread(KID_TO_READ, $line, 64_000) > 0)
@@ -351,20 +399,19 @@ sub install ($)
 
             chomp($line);
 
-            #$line = $_;
             $match = FALSE;
             chomp(my $buffer = $line);
             next if check_error($buffer);
             my $cols = ' ';
-            
+
             if ($buffer =~ /(Selecting)(.*)/)
             {
-                $col = BOLD CYAN, ">>> $1", RESET ;
+                $col = BOLD CYAN, ">>> $1", RESET;
                 $buffer = $2;
             }
             elsif ($buffer =~ /(Unpacking)(.*)/)
             {
-                $col = BOLD GREEN, ">>> $1", RESET ;
+                $col = BOLD GREEN, ">>> $1", RESET;
                 $buffer = $2;
             }
             elsif ($buffer =~ /(Removing|Purging)(.*)/)
@@ -375,15 +422,15 @@ sub install ($)
             elsif ($buffer =~ /(.*)(\.\.\.|\.\.)$/mg)
             {
                 $match = TRUE;
-                $s = $1;    
-                #print "TREU\n";
-                $cols = BOLD BLUE, '[ ', BOLD GREEN, 'OK', BOLD BLUE ' ]', RESET;
+                $s     = $1;
+                $cols  = BOLD BLUE, '[ ', BOLD GREEN, 'OK', BOLD BLUE ' ]',
+                  RESET;
             }
-            else 
+            else
             {
                 $col = RESET ">>>";
             }
-            
+
             if ($buffer =~ /.*Reading database|Extracting.*/)
             {
                 print "\t$buffer\r", RESET;
@@ -402,36 +449,15 @@ sub install ($)
         close KID_TO_READ;
     }
     else
-    {    # child
-            #  ($EUID, $EGID) = ($UID, $GID); # suid only
-        exec("aptitude -y   $cmd @ARGV 2>&1") || die "can't exec program: $!";
+    {
+
+        #  ($EUID, $EGID) = ($UID, $GID); # suid only
+        exec("aptitude -y   $cmd @pkg_list 2>&1")
+          || die "can't exec program: $!";
         exit;
 
     }
     exit;
-}
-
-
-
-
-{
-    my $i;
-
-    sub spinner ()
-    {
-        $| = 1;
-        my %spinner = (
-                       '|'  => '/',
-                       '/'  => '-',
-                       '-'  => "\\",
-                       "\\" => '|'
-                      );
-
-        $i = (!defined $i) ? '|' : $spinner{$i};
-
-        #print $string;
-        print "\b$i \b";
-    }
 }
 
 __END__
@@ -565,7 +591,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 21, 2010 08:20:40
+Mai 22, 2010 15:02:27
 
 =cut
 
