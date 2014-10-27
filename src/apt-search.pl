@@ -46,8 +46,8 @@ GetOptions(
     'compact|c'   => \$compact,
     'show|s'      => \$show,
     'sync'        => \$update,
-    'install|i'   => \$install,
-    'remove|r'    => \$remove,
+    'i|install'   => \$install,
+    'r|remove'    => \$remove,
 
           ) or pod2usage(-verbose => 0);
 
@@ -67,18 +67,21 @@ pod2usage("$0: No packages given.")
 &install('install') if $install;
 &install('remove')  if $remove;
 
-$flag = "'~n @ARGV'";
-$flag = "'~N @ARGV'" if $new;
-$flag = "~n *" if (@ARGV == 0) and not $new;
 
-&print() if not $show;
+&print(FALSE) if not $show;
 
-sub print ()
+sub print ($)
 {
+    my ($sync) = @_;
     my ($flag_color, $pkg_string);
     my $count = 0;
+
+    $flag = "'~n @ARGV'";
+    $flag = "'~N @ARGV'" if $new;
+    $flag = "~n " if (@ARGV == 0) and not $new;
+
     @result =
-      qx(aptitude -F "%s§%p§%V§%C§%A§%v§%a§%d" --disable-columns search $flag 2>&1);
+        qx(aptitude -F "%s§%p§%V§%C§%A§%v§%a§%d" --disable-columns search $flag 2>&1);
 
     foreach (@result)
     {
@@ -106,7 +109,7 @@ sub print ()
             }
             else
             {
-                $buffer = '(' . $version_string . '): ' . $a[7];
+                $buffer = ' (' . $version_string . '): ' . $a[7];
             }
 
             if ($a[3] eq "installed")
@@ -183,7 +186,8 @@ sub print ()
             }
         }
     }
-    print_info("Found " . $count . " matches.");    #if $count > 1;
+    print_info("New Packages: " . $count) if $sync;    
+    print_info("Found " . $count . " matches.") if not $sync;    #if $count > 1;
 }
 
 sub show ()
@@ -257,6 +261,8 @@ sub update ()
 
     }
     close UPDATE;
+    $new = TRUE;
+    &print(TRUE);
     exit;
 }
 
@@ -317,9 +323,10 @@ sub install ($)
                     
                     $pkg_list[$i] = $string[1];
                     $p[$i]        = '^' . $string[1] . '$';
-                    $string[2] =~ s/[\(\)]//;
+                    $string[2] =~ s/[\[\]\(\)]//g;
 
-                    $flags[$i] .= BOLD GREEN "N";
+                    $flags[$i] .= BOLD GREEN "N" if ($string[0] =~ /^Inst.*/);
+                    $flags[$i] .= BOLD RED "R" if ($string[0] =~ /^Rem.*/);
                     $pkg_version[$i] = BOLD GREEN, $string[1], RESET,
                       "-$string[2]";
 
@@ -345,7 +352,7 @@ sub install ($)
                 foreach (@pkg_version)
                 {
                     chomp($size[$i]);
-                    $line .= RESET "[  ", $flags[$i], RESET,
+                    $line .= RESET "[", BOLD YELLOW 'package ', RESET $flags[$i], RESET,
                       "  ] $pkg_version[$i] $size[$i] \n";
                     $i++;
                 }
@@ -396,7 +403,7 @@ sub install ($)
             }
 
         }
-        color_apt("aptitude -y $aptstring",\@pkg_list);
+        color_apt("aptitude -y $aptstring",\@ARGV);
 
     exit;
 }
@@ -536,7 +543,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 =head1 DATE
 
-Mai 22, 2010 23:50:48
+Mai 26, 2010 06:09:16
 
 =cut
 # vi:ts=4:sw=4:ai:expandtab 

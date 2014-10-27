@@ -119,7 +119,7 @@ sub ask_user ($)
     sub spinner ()
     {
         my $i;
-# local              $| = 1;
+ local              $| = 1;
         my %spinner = (
                        '|'  => '/',
                        '/'  => '-',
@@ -144,6 +144,7 @@ sub color_apt ($@)
 
     if ($pid)
     {
+        
         while (sysread(PIPE, $line, 64_000) > 0)
         {
 
@@ -174,31 +175,35 @@ sub color_apt ($@)
             }
             else
             {
-                $color = RESET ">>>";
+                $color = RESET "\r>>>";
             }
 
-        $| = 1;
             if ($buffer =~ /.*Reading database|Extracting.*/)
             {
-                print "\t$buffer\r";
+                print("\r\t$buffer");
+                if ($buffer =~ /.*installed/)
+                {
+                    print "\n";
+                }
                 next;
             }
 
             print_ok($1) if $match;
 
-            if (length($buffer) > 1)
+             if (length($buffer) > 1)
             {
                 print_info($color.' '. $buffer) if not $match;
-            }
+                }
         }
         print "\n";
         close PIPE;
     }
     else
     {
-
+        
+        #    $| = 1;
         #  ($EUID, $EGID) = ($UID, $GID); # suid only
-        exec($aptstring." @$pkg_list 2>&1")
+            exec($aptstring." @$pkg_list 2>&1")
           || die "can't exec program: $!";
         exit;
 
