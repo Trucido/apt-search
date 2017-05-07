@@ -1,3 +1,36 @@
+apt-serch.pl: colors your aptitude search requests  
+    with output similar to the gentoo commands:  
+    ``emerge --search`` and ``eix``  
+  
+Forked on May 7, 2017 since the original author has not updated it and was is missing a proper readme for dependencies and installation.   
+  
+Dependencies:  
+    •perl (Seems to still work with perl 5.24)  
+    •Functions.pm (included in src directory)  
+    •Other perl stuff? When I find any other deps I'll update this readme  
+  
+Installation:  
+    •Simply copy both apt-search.pl and Functions.pm to a directory in your PATH such as ~/bin/ or /usr/local/bin/  
+    •chmod +x apt-search.pl as well.  
+  
+Usage:  
+    •See below, but the script will work without any arguments also.  
+    •Syntax is similar to ``eix``  
+  
+Other info:  
+    •This script will show virtual packages, as well as real ones.  
+    •Since it has not been updated in quite some time, be careful using any functionality it might have that could write or modify data on your system.  
+   
+TODO:  
+    •Write most of this in a proper readme and man page  
+    •Find all required dependencies  
+    •Fix the formatting slightly, since it seems to add some extra unnecessary empty lines between search items.  
+    
+Updated example image:
+![alt text](https://cloud.githubusercontent.com/assets/5420611/25785451/a6687020-334e-11e7-947d-ed22bb6c76d8.png)
+
+====================== Original README.md below: ==========================
+
 [![Alt text for your video](https://img.youtube.com/vi/RCsjAzDWPW0/0.jpg)](https://www.youtube.com/watch?v=RCsjAzDWPW0)
 
 NAME
